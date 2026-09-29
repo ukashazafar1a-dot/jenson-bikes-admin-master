@@ -1,0 +1,226 @@
+import React, { useEffect, useRef, useState,useContext } from 'react'
+import { CForm,CCol,CButton,CFormInput,CFormTextarea,CFormLabel,CCard, CCardBody, CFormSelect, CCardTitle, CSpinner } from '@coreui/react'
+import { Formik } from 'formik';
+import mernDashApi from 'src/helpers/apiUtils';
+import { AppContext } from 'src/context/app/appContext';
+import { useNavigate,useParams } from 'react-router-dom';
+import Editor from 'src/components/Editor';
+import slugify from 'react-slugify'
+import Tags from './Components/Tags';
+import ViewImageArea from './Components/ViewImageArea';
+import ViewLoader from 'src/components/Loaders/ViewLoader';
+import { htmlDecode } from 'src/helpers/generals';
+import ProductsList from './Components/ProductsList';
+
+function View() {
+    const navigate = useNavigate()
+    const {id} = useParams()
+
+  const { setNotification } = useContext(AppContext);
+  const [featuredImage, setFeaturedImage] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [collectionId,setCollectionId] = useState(null);
+  const [products, setProducts] = useState([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [isChanged, setIsChanged] = useState(false)
+  const [initialValues,setInitialValues] = useState({
+    title: '',
+    description: '',
+    isActive: '1',
+    products: [],
+    pageTitle: '',
+    metaDescription: '',
+    tags: [],
+    slug: ''
+  })
+  const formRef = useRef();
+
+  const getFormikValues = function(){
+    if(formRef?.current) return formRef?.current.values
+    return {}
+  }
+
+  const validator = function(values){
+    const errors = {}
+    if(!values.title) errors.title = 'Title is required';
+    return errors
+  }
+
+  const submitHandler =  async function(){
+    try{
+        setIsSubmitting(true)
+        const {title,description,isActive,pageTitle,metaDescription,slug,tags} = getFormikValues()
+        let formData = new FormData()
+        formData.append('title',title);
+        formData.append('description',description);
+        formData.append("isActive", isActive);
+        formData.append('pageTitle',pageTitle);
+        formData.append('metaDescription',metaDescription)
+        formData.append("tags", JSON.stringify(tags));
+        formData.append('slug',slug)
+
+        mernDashApi.post('/api/collections/update/'+collectionId,formData,{
+            headers: {
+                'Content-Type': 'multipart/form-data',
+            }
+        }).then((data)=>{
+            setIsSubmitting(false)
+            setNotification(false,'Updated Successfully!')
+            setIsChanged(false)
+        }).catch((err)=>{
+            setIsSubmitting(false)
+            setNotification(true, err.response.data.message ? err.response.data.message :'Something went wrong!')
+        })
+    }catch(err){
+        setNotification(true, err.message)
+        console.log("Errr",err)
+    }
+    // const res = await axios.post('/api/auth/login', data);
+  }
+
+  const changeSlug = function(value){
+    formRef.current.setFieldValue('slug', slugify(value))
+    setSlugAltered(true)
+    checkChanged()
+  }
+
+  const removeCollection = function(){
+    try {
+        mernDashApi.get('/api/collections/delete/'+collectionId).then((data)=>{
+            setNotification(false,'Collection removed!')
+            navigate('/store/collections')
+        }).catch((err)=>{
+            setNotification(true,'Something went wrong!')
+        })
+    } catch (error) {
+        setNotification(true, error.message)
+        console.log("Errr",error)
+    }
+  }
+
+  const checkChanged = function(){
+    const {isActive,title,description,pageTitle,metaDescription,slug,tags} = getFormikValues()
+    if(isActive !== initialValues.isActive || title !== initialValues.title || description !== initialValues.description || pageTitle !== initialValues.pageTitle || metaDescription !== initialValues.description || slug !== initialValues.slug || tags !== initialValues.tags){
+        setIsChanged(true)
+    }else{
+        setIsChanged(false)
+    }
+  }
+
+  const changeField = function(type,value){
+    if(formRef?.current) formRef.current.setFieldValue(type,value)
+    console.log("Value", value)
+    checkChanged()
+  }
+
+  useEffect(()=>{
+    const getCollection = async ()=>{
+      const {data,status} = await mernDashApi.get('/api/collections/'+id)
+      const {collection} = data
+      if(status === 200){
+        setInitialValues({
+            isActive : collection.isActive ? '1' : '0',
+            title : collection.title,
+            description : htmlDecode(collection.body_html),
+            pageTitle : collection.page_title,
+            metaDescription : collection.meta_description,
+            slug : collection.slug,
+            tags: collection.tags
+        })
+        setFeaturedImage(collection.featured_image)
+        setCollectionId(collection._id)
+        setProducts(collection.products)
+        setIsLoading(false)
+      }
+    }
+    getCollection()
+  },[])
+
+  if(isLoading) return <ViewLoader/>;
+
+  return (
+    <>
+        <Formik 
+            innerRef={formRef}
+            initialValues={initialValues}
+            validate={validator}
+            onSubmit={()=>{
+                submitHandler()
+            }}>
+                {({values,errors,touched,handleSubmit,handleChange,setFieldValue})=>(
+            <CForm className='row' onSubmit={handleSubmit}>
+            <CCol md={8} className="px-4 py-3 rounded-3">
+                <div className="row g-3">
+                    <CCard>
+                        <CCardBody>
+                            <CFormInput type="text" name='title' 
+                                    id="inputEmail4" label="Title" value={values.title} 
+                                    onChange={(e)=>changeField('title',e.currentTarget.value)} feedbackInvalid={errors.title} invalid={errors.title && touched.title} />
+
+                            <CFormLabel className='mt-3'>Description</CFormLabel>
+                            <Editor placeholder={"write something..."} value={values.description} setValue={changeField}/>
+                        </CCardBody>
+                    </CCard>
+                    <CCard>
+                        <CCardBody>
+                            <CCardTitle>Products</CCardTitle>
+                            <ProductsList products={products} collectionId={collectionId}/>
+                        </CCardBody>
+                    </CCard>
+                    <CCard>
+                        <CCardBody>
+                            <CCardTitle>Search engine listing</CCardTitle>
+                            <div className="mb-3">
+                                <CFormLabel htmlFor="pageTitleInput">Page Title</CFormLabel>
+                                <CFormInput type="text" id="pageTitleInput" name='pageTitle' value={values.pageTitle} onChange={(e)=>changeField('pageTitle',e.currentTarget.value)} placeholder="Page title"/>
+                            </div>
+                            <div className="mb-3">
+                                <CFormLabel htmlFor="metaDescriptionInput">Meta Description</CFormLabel>
+                                <CFormTextarea id="metaDescriptionInput" name='metaDescription' value={values.metaDescription} onChange={(e)=>changeField('metaDescription',e.currentTarget.value)} rows={4}></CFormTextarea>
+                            </div>
+                            <div className='mb-3'>
+                                <CFormLabel htmlFor='slug'>Page Slug</CFormLabel>
+                                <small style={{display:'block',marginBottom:'1rem'}}>https://ozelu.com/collections/{values.slug}</small>
+                                <CFormInput type='text'  id='slug' name='slug' onChange={(e)=>changeSlug(e.currentTarget.value)} placeholder={values.slug}></CFormInput>
+                            </div>
+                        </CCardBody>
+                    </CCard>
+                </div>
+            </CCol>
+            <CCol md={4} className="px-4 py-3 rounded-3">
+                <CCard>
+                    <CCardBody>
+                        <CFormLabel>Collection Status</CFormLabel>
+                        <CFormSelect value={values.isActive} onChange={(e)=>changeField('isActive',e.currentTarget.value)} name="isActive" 
+                            aria-label="Collection Status"
+                            options={[
+                                { label: 'Active', value: '1' },
+                                { label: 'Draft', value: '0' }
+                            ]}
+                        />
+                    </CCardBody>
+                </CCard>
+                <ViewImageArea file={featuredImage} collectionId={collectionId}/>
+                <CCard className='mt-3'>
+                    <CCardBody>
+                        <CCardTitle>Tags</CCardTitle>
+                        <Tags value={values.tags} setValue={changeField}/>
+                    </CCardBody>
+                </CCard>
+            </CCol>
+            <hr/>
+            <CCol xs={12} className="text-center mb-3 d-flex justify-content-between">
+                <CButton color='danger' onClick={()=>removeCollection()}>Delete Collection</CButton>
+                <CButton type="submit" color='info' style={{color:'white'}} disabled={!isChanged}>
+                    {isSubmitting ? (<CSpinner component="span" size="sm" aria-hidden="true"/>) :
+                    ('Save') }
+                </CButton>
+            </CCol>
+        </CForm>
+            )}
+        </Formik>
+    </>
+  )
+}
+
+export default View
